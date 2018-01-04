@@ -1,18 +1,20 @@
 use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::io::{BufRead, BufReader};
 
-const FSTAB_PATH : &'static str = "/etc/fstab";
+const FSTAB_PATH: &'static str = "/etc/fstab";
 
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
-enum ErrorType {
+pub enum ErrorType {
     FstabNotExist(String),
     NumParseError(String),
+    FieldNotExist(usize),
+    TooManyFields(String),
 }
 
-#[derive(Debug,Clone)]
-struct Error {
+#[derive(Debug, Clone)]
+pub struct Error {
     reason: ErrorType,
 }
 
@@ -40,21 +42,16 @@ impl From<std::num::ParseIntError> for Error {
     }
 }
 
-
 impl std::error::Error for Error {
     fn description(&self) -> &str {
         match self.reason {
-            ErrorType::FstabNotExist(_) => {
-                "can not open fstab"
-            },
-            _ => {
-                "unkonwn error"
-            },
+            ErrorType::FstabNotExist(_) => "can not open fstab",
+            _ => "unkonwn error",
         }
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub enum Device {
     Uuid(String),
     Label(String),
@@ -63,17 +60,17 @@ pub enum Device {
     PartLabel(String),
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Fstab {
-    device: Device,
-    dir: String,
-    device_type: String,
-    options: Vec<String>,
-    dump: bool,
-    fsck: usize,
+    pub device: Device,
+    pub dir: String,
+    pub device_type: String,
+    pub options: Vec<String>,
+    pub dump: bool,
+    pub fsck: usize,
 }
 
-fn parse_device(name: &str) -> Device {
+pub fn parse_device(name: &str) -> Device {
     if name.starts_with("UUID=") {
         Device::Uuid(name.split_at(5).1.to_owned())
     } else if name.starts_with("LABEL=") {
@@ -87,12 +84,11 @@ fn parse_device(name: &str) -> Device {
     }
 }
 
-fn open_fstab(path: Option<&str>) -> Result<Vec<Fstab>> {
-    let fstab_handle = File::open(
-        match path { 
-            Some(p) => p, 
-            _ => FSTAB_PATH, 
-        })?;
+pub fn open_fstab(path: Option<&str>) -> Result<Vec<Fstab>> {
+    let fstab_handle = File::open(match path {
+        Some(p) => p,
+        _ => FSTAB_PATH,
+    })?;
 
     let reader = BufReader::new(fstab_handle);
 
@@ -101,29 +97,52 @@ fn open_fstab(path: Option<&str>) -> Result<Vec<Fstab>> {
     for l in reader.lines() {
         if let Ok(l) = l {
             let l = l.trim();
-            if l.starts_with("#") {
+            if l.starts_with("#") || l.len() == 0 {
                 continue;
-            } 
-            let tabs = l.split_whitespace().collect::<Vec<_>>();
-            if tabs.len() == 6 {
-                fstab_item_list.push(Fstab{
-                    device: parse_device(tabs[0]),
-                    dir: tabs[1].to_owned(),
-                    device_type: tabs[2].to_owned(),
-                    options: tabs[3].split(",").map(|x| x.to_owned()).collect::<Vec<_>>(),
-                    dump: tabs[4].parse::<usize>().map(|x| if x > 0 { true } else { false})?,
-                    fsck: tabs[5].parse::<usize>()?,
-                });
+            }
+            let mut tabs = l.split_whitespace();
+            fstab_item_list.push(Fstab {
+                device: parse_device(tabs.next().ok_or(Error {
+                    reason: ErrorType::FieldNotExist(0),
+                })?),
+                dir: tabs.next()
+                    .ok_or(Error {
+                        reason: ErrorType::FieldNotExist(1),
+                    })?
+                    .to_owned(),
+                device_type: tabs.next()
+                    .ok_or(Error {
+                        reason: ErrorType::FieldNotExist(2),
+                    })?
+                    .to_owned(),
+                options: tabs.next()
+                    .ok_or(Error {
+                        reason: ErrorType::FieldNotExist(3),
+                    })?
+                    .split(",")
+                    .map(|x| x.to_owned())
+                    .collect::<Vec<_>>(),
+                dump: match tabs.next() {
+                    Some(x) => x.parse::<usize>()
+                        .map(|x| if x > 0 { true } else { false })?,
+                    _ => false,
+                },
+                fsck: match tabs.next() {
+                    Some(x) => x.parse::<usize>()?,
+                    _ => 0,
+                },
+            });
+            if tabs.next().is_some() {
+                return Err(Error { reason: ErrorType::TooManyFields(l.to_owned())});
             }
         }
     }
-
     Ok(fstab_item_list)
 }
 
 #[test]
 fn read_default_fstab() {
     let fstab = open_fstab(None);
-    assert!(fstab.is_ok());
     println!("{:?}", fstab);
+    assert!(fstab.is_ok());
 }
