@@ -13,4 +13,4 @@ Open `/home/user/fstab`:
 ```rust
 open_fstab("/home/user/fstab")
 ```
-Return a `Vec<Fstab>` when successes, and `Error` when fails.
+Return a `Vec<Fstab>` when successes, and a `Error` when fails.

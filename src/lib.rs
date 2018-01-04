@@ -1,15 +1,21 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+/// Default Path for `fstab`
 const FSTAB_PATH: &'static str = "/etc/fstab";
 
 type Result<T> = std::result::Result<T, Error>;
 
+/// Type of errors
 #[derive(Debug, Clone)]
 pub enum ErrorType {
+///   `fstab` file does not exist at the given path
     FstabNotExist(String),
+///   The numbers in `dump` and `fsck` fields are incorrect
     NumParseError(String),
+///   Required fields(UUID, device type, etc.) do not exist
     FieldNotExist(usize),
+///   Extra failds after `fsck`
     TooManyFields(String),
 }
 
@@ -51,6 +57,13 @@ impl std::error::Error for Error {
     }
 }
 
+/// Types of device name
+///
+/// Devices have 3 possible types of names:
+///
+/// * UUID (F1C1-3AC0)
+/// * LABEL (MyDisk)
+/// * Mount Point (/dev/sda)
 #[derive(Debug, Clone)]
 pub enum Device {
     Uuid(String),
@@ -60,17 +73,24 @@ pub enum Device {
     PartLabel(String),
 }
 
+/// Types for storing an item of fstab
 #[derive(Debug, Clone)]
 pub struct Fstab {
+    /// fs_spec, the block special device or remote filesystem to be mounted
     pub device: Device,
+    /// fs_file, the mount point for the filesysteml
     pub dir: String,
+    /// fs_vfstype, the type of the filesystem
     pub device_type: String,
+    /// fs_mntops, mount options
     pub options: Vec<String>,
+    /// fs_freq, need to be dumped or not
     pub dump: bool,
+    /// fs_passno, filesystem checks are done at boot time or not
     pub fsck: usize,
 }
 
-pub fn parse_device(name: &str) -> Device {
+fn parse_device(name: &str) -> Device {
     if name.starts_with("UUID=") {
         Device::Uuid(name.split_at(5).1.to_owned())
     } else if name.starts_with("LABEL=") {
@@ -84,6 +104,8 @@ pub fn parse_device(name: &str) -> Device {
     }
 }
 
+/// Open a fstab file and read it into a list of `Fstab`
+/// When `path` is set to `None`, this function will use the default path.
 pub fn open_fstab(path: Option<&str>) -> Result<Vec<Fstab>> {
     let fstab_handle = File::open(match path {
         Some(p) => p,
